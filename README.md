@@ -11,10 +11,12 @@ fonts or UI.
 
 ## Run it
 
-It is one self-contained HTML file with no build step and no dependencies:
+It is one self-contained HTML file with no dependencies and no toolchain. The
+only build step is a 40-line shell script that adds a `<head>` for self-hosting:
 
 ```bash
-open pocket-critter.html
+open pocket-critter.html      # the source, straight from disk
+./build.sh && open index.html # the self-hosted build, with analytics
 ```
 
 Fonts come from Google Fonts; everything else — art, sound, game loops — is
@@ -57,20 +59,52 @@ The pieces worth knowing about:
   `db` capability; the page degrades to a clear message when it resolves `null`,
   and solo play never depends on it.
 
+## Hosting: two outputs, one source
+
+`pocket-critter.html` is the source of truth and is deliberately **headless** —
+no `<!doctype>`, `<html>`, `<head>` or `<body>` — because a published Claude
+artifact supplies that skeleton itself.
+
+`./build.sh` wraps it into `index.html` for GitHub Pages, adding the one thing
+an artifact cannot have: a real `<head>`. Everything host-specific lives in that
+script — the `og:`/`twitter:` tags and the GoatCounter snippet — so the artifact
+build stays clean and the hosted build gets what only a real domain can support.
+
+```bash
+./build.sh    # pocket-critter.html -> index.html
+```
+
+Edit `pocket-critter.html`, never `index.html`; the latter is generated and
+carries a banner saying so.
+
+## Analytics
+
+GoatCounter, on the self-hosted page only: the published artifact's CSP admits
+no analytics host, and `gcSend` no-ops there rather than pretending.
+
+- **Pageviews** are counted per screen (`/home`, `/games`, `/shop`, `/room`,
+  `/pet`, `/adopt`, `/visit`). `count.js` is loaded with `no_onload` because the
+  `?pet=xxxxxxxx` deep link would otherwise register one distinct path per pet
+  visited and bury the real routes.
+- **Custom events** are sent as `ev-<name>`: `adopt`, `feed`, `play_game`,
+  `job_start`, `job_collect`, `buy`, `share_click`, `postcard_make`,
+  `visit_from_link`, `gift_sent`, `gift_seen`, `personality_set`, `tuck_in`.
+- Every event is also buffered in `localStorage` (last 400), and
+  `analyticsSummary()` rolls up the two numbers that matter — shares per user
+  and visit-to-adopt — on the Critter card.
+- `ANALYTICS_ENDPOINT` remains a second, independent sink for any collector that
+  accepts a JSON POST body.
+
+`count.js` refuses to count from `localhost`, so local development does not
+pollute the data.
+
 ## Known gaps
 
-Three things in the original spec are not fully deliverable in this hosting
-model, and are stubbed at a clean seam rather than faked:
-
-1. **Open Graph unfurling.** The page can't control the `<head>` of its own
-   hosted URL, so links unfurl with the host's card, not
-   "Biscuit the Moth needs soup". The postcard generator already produces exactly
-   the image an `og:image` wants — this needs a real domain.
-2. **Third-party analytics.** No script host for GoatCounter/Plausible is
-   reachable under the page's CSP. The event layer is built with the intended
-   event names and buffers locally; set `ANALYTICS_ENDPOINT` to a collector URL
-   and events ship via `sendBeacon`.
-3. **Web push.** No service worker, so no true push. `Notify` implements exactly
+1. **Per-pet Open Graph titles.** The site unfurls with static tags and
+   `og-card.png` (rendered by the game's own postcard code). A per-pet unfurl —
+   "Biscuit the Lampmoth needs soup" on a `?pet=` link — needs server-side
+   rendering, which a static host cannot do.
+2. **Web push.** No service worker, so no true push. `Notify` implements exactly
    two events — "misses you" after 36h and "shift complete" — with an `adapter`
    seam for a push backend, falling back to the local Notification API.
 
